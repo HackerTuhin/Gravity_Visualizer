@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Physics Simulation</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; overflow: hidden; font-family: 'Courier New', monospace; background: #0a0a0f; }
+        canvas { display: block; }
+
+        #panel {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(5,10,20,0.88);
+            border: 1px solid rgba(0,200,255,0.25);
+            border-radius: 14px;
+            padding: 12px 18px;
+            color: #00ccff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            max-width: calc(100vw - 32px);
+            z-index: 10;
+            user-select: none;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 0 40px rgba(0,150,255,0.08);
+        }
+        #panel label { font-size: 12px; white-space: nowrap; letter-spacing: 0.08em; opacity: 0.7; }
+        #panel input[type="range"] {
+            -webkit-appearance: none;
+            width: clamp(90px, 10vw, 130px);
+            height: 4px;
+            background: rgba(0,200,255,0.15);
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+        }
+        #panel input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #00ccff;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 8px rgba(0,200,255,0.6);
+        }
+        #panel input[type="number"] {
+            width: 74px;
+            height: 28px;
+            background: rgba(0,200,255,0.08);
+            border: 1px solid rgba(0,200,255,0.32);
+            border-radius: 7px;
+            color: #fff;
+            font: bold 12px 'Courier New', monospace;
+            text-align: right;
+            padding: 0 8px;
+            outline: none;
+        }
+        #panel input[type="number"]:focus {
+            border-color: rgba(0,220,255,0.85);
+            box-shadow: 0 0 12px rgba(0,200,255,0.22);
+        }
+        #panel input[type="number"]::-webkit-outer-spin-button,
+        #panel input[type="number"]::-webkit-inner-spin-button {
+            margin-left: 4px;
+        }
+        #panel span {
+            font-size: 12px;
+            min-width: 54px;
+            text-align: right;
+            color: #fff;
+            font-weight: bold;
+        }
+        .ctrl-group { display: flex; align-items: center; gap: 8px; }
+        .divider { width: 1px; height: 30px; background: rgba(0,200,255,0.15); }
+
+        #actionBtn {
+            background: rgba(0,200,255,0.1);
+            border: 1px solid rgba(0,200,255,0.4);
+            color: #00ccff;
+            padding: 7px 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            letter-spacing: 0.08em;
+            white-space: nowrap;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+        #actionBtn:hover { background: rgba(0,200,255,0.22); box-shadow: 0 0 16px rgba(0,200,255,0.2); }
+
+        #hint {
+            position: fixed;
+            bottom: 88px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(0,200,255,0.4);
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #stats {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(5,10,20,0.88);
+            border: 1px solid rgba(0,200,255,0.2);
+            border-radius: 12px;
+            padding: 16px 22px;
+            color: #00ccff;
+            z-index: 10;
+            user-select: none;
+            font-size: 12px;
+            line-height: 2;
+            backdrop-filter: blur(12px);
+            min-width: 200px;
+        }
+        #stats .row { display: flex; justify-content: space-between; gap: 24px; }
+        #stats .lbl { opacity: 0.45; letter-spacing: 0.06em; }
+        #stats .val { color: #fff; font-weight: bold; text-align: right; }
+        #stats .val.jumping { color: #00ffaa; }
+        #stats .val.grounded { color: #00ccff; }
+
+        #energyBar {
+            margin-top: 10px;
+            height: 3px;
+            border-radius: 2px;
+            background: rgba(0,200,255,0.1);
+            overflow: hidden;
+        }
+        #energyFill {
+            height: 100%;
+            background: linear-gradient(90deg, #00ccff, #00ffaa);
+            transition: width 0.05s linear;
+            box-shadow: 0 0 8px rgba(0,255,170,0.5);
+        }
+    </style>
+</head>
+<body>
+    <div id="hint">SPACE to launch · DRAG to orbit · SCROLL to zoom</div>
+    <div id="panel">
+        <div class="ctrl-group">
+            <label>FORCE (N)</label>
+            <input type="range" id="jumpPowerSlider" min="20" max="1000" step="10" value="220">
+            <input type="number" id="jumpPowerValue" min="0" step="any" value="220" title="Custom force in newtons">
+        </div>
+        <div class="divider"></div>
+        <div class="ctrl-group">
+            <label>MASS (kg)</label>
+            <input type="range" id="weightSlider" min="1" max="100" step="1" value="10">
+            <input type="number" id="weightValue" min="0.001" step="any" value="10" title="Custom mass in kilograms">
+        </div>
+        <div class="divider"></div>
+        <div class="ctrl-group">
+            <label>GRAVITY</label>
+            <input type="range" id="gravitySlider" min="0" max="50" step="0.1" value="9.8">
+            <input type="number" id="gravityValue" min="0" step="any" value="9.8" title="Custom gravity in m/s^2">
+        </div>
+        <div class="divider"></div>
+        <div class="ctrl-group">
+            <label>BOUNCE</label>
+            <input type="range" id="bounceSlider" min="0" max="0.99" step="0.01" value="0.75">
+            <input type="number" id="bounceValue" min="0" step="any" value="0.75" title="Custom coefficient of restitution">
+        </div>
+        <div class="divider"></div>
+        <button id="actionBtn">RESET</button>
+    </div>
+    <div id="stats">
+        <div class="row"><span class="lbl">STATE</span><span class="val grounded" id="statState">GROUNDED</span></div>
+        <div class="row"><span class="lbl">SPEED</span><span class="val" id="statSpeed">0.00 m/s</span></div>
+        <div class="row"><span class="lbl">HEIGHT</span><span class="val" id="statHeight">0.00 m</span></div>
+        <div class="row"><span class="lbl">MAX HEIGHT</span><span class="val" id="statMaxHeight">0.00 m</span></div>
+        <div class="row"><span class="lbl">ACCEL</span><span class="val" id="statAccel">0.00 m/s^2</span></div>
+        <div class="row"><span class="lbl">BOUNCES</span><span class="val" id="statBounces">0</span></div>
+        <div id="energyBar"><div id="energyFill" style="width:0%"></div></div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.174.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // ── Scene ──────────────────────────────────────────────────────
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x080810);
+        scene.fog = new THREE.FogExp2(0x080810, 0.04);
+
+        const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 500);
+        camera.position.set(5, 4, 7);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.06;
+        controls.minDistance = 2;
+        controls.maxDistance = 30;
+        controls.target.set(0, 1, 0);
+
+        // ── Lighting ───────────────────────────────────────────────────
+        scene.add(new THREE.AmbientLight(0x112233, 1.5));
+
+        const dirLight = new THREE.DirectionalLight(0x4488ff, 2.5);
+        dirLight.position.set(5, 12, 8);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.set(2048, 2048);
+        dirLight.shadow.camera.near = 0.1;
+        dirLight.shadow.camera.far = 60;
+        dirLight.shadow.camera.left = -15;
+        dirLight.shadow.camera.right = 15;
+        dirLight.shadow.camera.top = 15;
+        dirLight.shadow.camera.bottom = -15;
+        scene.add(dirLight);
+
+        const rimLight = new THREE.PointLight(0x00ffaa, 1.5, 20);
+        rimLight.position.set(-5, 5, -5);
+        scene.add(rimLight);
+
+        // ── Ground ─────────────────────────────────────────────────────
+        // Physics ground at y=0; sphere radius=1; sphere center sits at y=1 when resting
+        const GROUND_Y = 0;
+        const SPHERE_RADIUS = 1;
+        const SPHERE_REST_Y = GROUND_Y + SPHERE_RADIUS; // = 1
+
+        const groundGeo = new THREE.PlaneGeometry(60, 60);
+        const groundMat = new THREE.MeshStandardMaterial({
+            color: 0x0a1020,
+            roughness: 0.9,
+            metalness: 0.1,
+        });
+        const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+        groundMesh.rotation.x = -Math.PI / 2;
+        groundMesh.position.y = GROUND_Y;
+        groundMesh.receiveShadow = true;
+        scene.add(groundMesh);
+
+        // Grid exactly on the ground plane
+        const grid = new THREE.GridHelper(60, 60, 0x1a2a3a, 0x111820);
+        grid.position.y = GROUND_Y + 0.001;
+        scene.add(grid);
+
+        // ── Fibonacci-sphere dot cloud ─────────────────────────────────
+        function fibonacciSphere(n) {
+            const pos = new Float32Array(n * 3);
+            const phi = Math.PI * (3 - Math.sqrt(5));
+            for (let i = 0; i < n; i++) {
+                const y = 1 - (i / (n - 1)) * 2;
+                const r = Math.sqrt(1 - y * y);
+                const theta = phi * i;
+                pos[i * 3]     = Math.cos(theta) * r;
+                pos[i * 3 + 1] = y;
+                pos[i * 3 + 2] = Math.sin(theta) * r;
+            }
+            return pos;
+        }
+
+        // Glow dot texture
+        const dotCanvas = document.createElement('canvas');
+        dotCanvas.width = dotCanvas.height = 32;
+        const dctx = dotCanvas.getContext('2d');
+        const grad = dctx.createRadialGradient(16,16,0,16,16,16);
+        grad.addColorStop(0,   'rgba(0,220,255,1)');
+        grad.addColorStop(0.3, 'rgba(0,180,255,0.7)');
+        grad.addColorStop(0.7, 'rgba(0,100,200,0.2)');
+        grad.addColorStop(1,   'rgba(0,0,0,0)');
+        dctx.fillStyle = grad;
+        dctx.fillRect(0,0,32,32);
+        const dotTex = new THREE.CanvasTexture(dotCanvas);
+
+        const DOT_COUNT = 5000;
+        const dotGeo = new THREE.BufferGeometry();
+        dotGeo.setAttribute('position', new THREE.BufferAttribute(fibonacciSphere(DOT_COUNT), 3));
+
+        const dotMat = new THREE.PointsMaterial({
+            size: 0.035,
+            map: dotTex,
+            color: 0x00ccff,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            transparent: true,
+        });
+
+        // Wrapper group: moves up/down with physics
+        const sphereGroup = new THREE.Group();
+        sphereGroup.position.y = SPHERE_REST_Y;
+        scene.add(sphereGroup);
+
+        const dots = new THREE.Points(dotGeo, dotMat);
+        sphereGroup.add(dots);
+
+        // Equator rings
+        for (let r = 0; r < 3; r++) {
+            const rg = new THREE.TorusGeometry(1 + r * 0.018, 0.006, 16, 200);
+            const rm = new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.12 });
+            const ring = new THREE.Mesh(rg, rm);
+            ring.rotation.x = Math.PI / 2;
+            sphereGroup.add(ring);
+        }
+
+        // Shadow blob on ground
+        const shadowGeo = new THREE.CircleGeometry(1, 64);
+        const shadowMat = new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            transparent: true,
+            opacity: 0.45,
+            depthWrite: false,
+        });
+        const shadowBlob = new THREE.Mesh(shadowGeo, shadowMat);
+        shadowBlob.rotation.x = -Math.PI / 2;
+        shadowBlob.position.y = GROUND_Y + 0.002;
+        scene.add(shadowBlob);
+
+        // ── Physics state ──────────────────────────────────────────────
+        const FIXED_DT = 1 / 120;
+        const MAX_FRAME_TIME = 0.08;
+        const LAUNCH_STROKE = 9.8 / 47; // 47 N on 1 kg at Earth gravity reaches about 1 m
+        const AIR_DENSITY = 1.225;
+        const DRAG_COEFFICIENT = 0.47; // smooth sphere
+        const CROSS_SECTION_AREA = Math.PI * SPHERE_RADIUS * SPHERE_RADIUS;
+        const SETTLE_SPEED = 0.08;
+        const SETTLE_HEIGHT = 0.015;
+
+        let y = SPHERE_REST_Y;
+        let vy = 0;
+        let ay = 0;
+        let isJumping = false;
+        let lastTime = performance.now();
+        let accumulator = 0;
+        let bounceCount = 0;
+        let currentLaunchEnergy = 1;
+        let squashAmount = 0;
+        const scaleTarget = new THREE.Vector3(1, 1, 1);
+
+        const controlsMap = {
+            force:   wireControl('jumpPowerSlider', 'jumpPowerValue', 0, 220),
+            mass:    wireControl('weightSlider',    'weightValue',    0.001, 10),
+            gravity: wireControl('gravitySlider',   'gravityValue',   0, 9.8),
+            bounce:  wireControl('bounceSlider',    'bounceValue',    0, 0.75),
+        };
+
+        const getGravity = () => controlsMap.gravity.value();
+        const getForce   = () => controlsMap.force.value();
+        const getMass    = () => controlsMap.mass.value();
+        const getBounce  = () => controlsMap.bounce.value();
+
+        function formatNumber(value) {
+            return Number.isInteger(value) ? String(value) : String(parseFloat(value.toFixed(6)));
+        }
+
+        function wireControl(sliderId, numberId, minValue, fallbackValue) {
+            const slider = document.getElementById(sliderId);
+            const input = document.getElementById(numberId);
+
+            const syncSlider = value => {
+                const sliderMin = parseFloat(slider.min);
+                const sliderMax = parseFloat(slider.max);
+                slider.value = Math.min(sliderMax, Math.max(sliderMin, value));
+            };
+
+            const read = () => {
+                const raw = parseFloat(input.value);
+                if (!Number.isFinite(raw)) return fallbackValue;
+                return Math.max(minValue, raw);
+            };
+
+            slider.addEventListener('input', () => {
+                input.value = slider.value;
+            });
+
+            input.addEventListener('input', () => {
+                const value = parseFloat(input.value);
+                if (Number.isFinite(value)) syncSlider(Math.max(minValue, value));
+            });
+
+            input.addEventListener('blur', () => {
+                const value = read();
+                input.value = formatNumber(value);
+                syncSlider(value);
+            });
+
+            syncSlider(read());
+            return {
+                value: read,
+                reset: () => {
+                    input.value = formatNumber(fallbackValue);
+                    syncSlider(fallbackValue);
+                },
+            };
+        }
+
+        // Reset
+        document.getElementById('actionBtn').addEventListener('click', reset);
+
+        function reset() {
+            Object.values(controlsMap).forEach(control => control.reset());
+            y = SPHERE_REST_Y;
+            vy = 0;
+            ay = 0;
+            isJumping = false;
+            accumulator = 0;
+            sphereGroup.position.y = y;
+            sphereGroup.scale.set(1,1,1);
+            bounceCount = 0;
+            currentLaunchEnergy = 1;
+            squashAmount = 0;
+            lastTime = performance.now();
+        }
+
+        // Launch on Space
+        window.addEventListener('keydown', e => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                launch();
+            }
+        });
+
+        // Also tap anywhere on canvas (mobile friendly)
+        renderer.domElement.addEventListener('pointerdown', e => {
+            if (e.target === renderer.domElement && !controls.enabled) return;
+            // Only launch on short tap (not drag start) — handled via pointerup delta
+        });
+
+        function getLaunchVelocity() {
+            const mass = getMass();
+            const force = getForce();
+
+            if (force <= 0) return 0;
+
+            const launchWork = force * LAUNCH_STROKE;
+            return Math.sqrt((2 * launchWork) / mass);
+        }
+
+        function predictMaxHeight() {
+            const gravity = getGravity();
+            const v0 = getLaunchVelocity();
+            if (v0 <= 0) return 0;
+            if (gravity <= 0.0001) return Infinity;
+            return (v0 * v0) / (2 * gravity);
+        }
+
+        function formatMeters(value) {
+            if (!Number.isFinite(value)) return 'INF m';
+            if (value >= 1000) return value.toFixed(1) + ' m';
+            return value.toFixed(2) + ' m';
+        }
+
+        function launch() {
+            if (isJumping) return;
+
+            const mass = getMass();
+            const gravity = getGravity();
+            const force = getForce();
+            const v0 = getLaunchVelocity();
+
+            if (v0 <= 0) {
+                squashAmount = Math.min(0.08, (force / Math.max(mass * gravity, 0.001)) * 0.035);
+                return;
+            }
+
+            y = SPHERE_REST_Y;
+            vy = v0;
+            ay = 0;
+            currentLaunchEnergy = Math.max(0.5 * mass * v0 * v0, 1);
+            isJumping = true;
+            bounceCount = 0;
+            accumulator = 0;
+            squashAmount = 0;
+            sphereGroup.scale.set(1, 1, 1);
+            sphereGroup.position.y = y;
+            lastTime = performance.now();
+        }
+
+        // ── Stats DOM ──────────────────────────────────────────────────
+        const statState   = document.getElementById('statState');
+        const statSpeed   = document.getElementById('statSpeed');
+        const statHeight  = document.getElementById('statHeight');
+        const statMaxHeight = document.getElementById('statMaxHeight');
+        const statAccel   = document.getElementById('statAccel');
+        const statBounces = document.getElementById('statBounces');
+        const energyFill  = document.getElementById('energyFill');
+
+        // ── Animation loop ─────────────────────────────────────────────
+        let rotY = 0;
+
+        function accelerationFor(velocity, mass, gravity) {
+            return -gravity;
+        }
+
+        function findGroundImpactTime(startY, startVy, accel, dt) {
+            const c = startY - SPHERE_REST_Y;
+            if (c <= 0) return 0;
+
+            if (Math.abs(accel) < 0.0001) {
+                if (startVy >= 0) return null;
+                const t = -c / startVy;
+                return t >= 0 && t <= dt ? t : null;
+            }
+
+            const a = 0.5 * accel;
+            const b = startVy;
+            const discriminant = b * b - 4 * a * c;
+            if (discriminant < 0) return null;
+
+            const root = Math.sqrt(discriminant);
+            const t1 = (-b - root) / (2 * a);
+            const t2 = (-b + root) / (2 * a);
+            const hits = [t1, t2].filter(t => t >= 0 && t <= dt);
+            return hits.length ? Math.min(...hits) : null;
+        }
+
+        function settleOnGround() {
+            y = SPHERE_REST_Y;
+            vy = 0;
+            ay = 0;
+            isJumping = false;
+            accumulator = 0;
+        }
+
+        function shouldSettle(reboundVy, gravity, bounceFactor) {
+            const peakHeight = (reboundVy * reboundVy) / (2 * Math.max(gravity, 0.001));
+            return bounceFactor < 0.015 || reboundVy < SETTLE_SPEED || peakHeight < SETTLE_HEIGHT;
+        }
+
+        function stepPhysics(dt) {
+            if (!isJumping) return;
+
+            const mass = getMass();
+            const gravity = getGravity();
+            const bounceFactor = getBounce();
+            const startY = y;
+            const startVy = vy;
+
+            ay = accelerationFor(startVy, mass, gravity);
+            vy += ay * dt;
+            y += startVy * dt + 0.5 * ay * dt * dt;
+
+            if (y > SPHERE_REST_Y) return;
+
+            const hitTime = findGroundImpactTime(startY, startVy, ay, dt) ?? dt;
+            const impactVy = startVy + ay * hitTime;
+            const impactSpeed = Math.max(0, -impactVy);
+
+            y = SPHERE_REST_Y;
+            bounceCount++;
+            squashAmount = Math.max(
+                squashAmount,
+                Math.min(0.22, impactSpeed * 0.018) * (0.45 + bounceFactor * 0.55)
+            );
+
+            const reboundVy = impactSpeed * bounceFactor;
+            if (shouldSettle(reboundVy, gravity, bounceFactor)) {
+                settleOnGround();
+                return;
+            }
+
+            vy = reboundVy;
+
+            const remaining = Math.max(0, dt - hitTime);
+            if (remaining > 0) {
+                ay = accelerationFor(vy, mass, gravity);
+                y = SPHERE_REST_Y + Math.max(0, vy * remaining + 0.5 * ay * remaining * remaining);
+                vy += ay * remaining;
+                if (y <= SPHERE_REST_Y && Math.abs(vy) < SETTLE_SPEED) settleOnGround();
+            }
+        }
+
+        function updateDeformation(dt) {
+            const bounceFactor = getBounce();
+            if (isJumping && y > SPHERE_REST_Y + 0.001 && bounceFactor > 0.02) {
+                const stretchAmt = Math.min(0.12, Math.abs(vy) * 0.006) * bounceFactor;
+                const sy = vy > 0 ? 1 + stretchAmt : 1 - stretchAmt * 0.35;
+                const sx = 1 / Math.sqrt(Math.max(sy, 0.05));
+                scaleTarget.set(sx, sy, sx);
+            } else if (squashAmount > 0.001) {
+                scaleTarget.set(1 + squashAmount, 1 - squashAmount, 1 + squashAmount);
+            } else {
+                scaleTarget.set(1, 1, 1);
+            }
+
+            sphereGroup.scale.lerp(scaleTarget, Math.min(1, dt * 16));
+            squashAmount *= Math.exp(-dt * 12);
+
+            if (!isJumping && squashAmount < 0.001) {
+                sphereGroup.scale.set(1, 1, 1);
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const now = performance.now();
+            const frameDt = Math.min((now - lastTime) / 1000, MAX_FRAME_TIME);
+            lastTime = now;
+
+            // Slow auto-rotate (visual only)
+            rotY += 0.004;
+            dots.rotation.y = rotY;
+
+            // ── Physics ──
+            accumulator += frameDt;
+            while (accumulator >= FIXED_DT) {
+                stepPhysics(FIXED_DT);
+                accumulator -= FIXED_DT;
+            }
+
+            sphereGroup.position.y = y;
+            updateDeformation(frameDt);
+
+            // ── Shadow blob scales/fades with height ──
+            const height = y - SPHERE_REST_Y; // 0 when on ground
+            const shadowScale = Math.max(0.2, 1 - height * 0.07);
+            shadowBlob.scale.set(shadowScale, shadowScale, shadowScale);
+            shadowBlob.position.x = sphereGroup.position.x;
+            shadowBlob.position.z = sphereGroup.position.z;
+            shadowMat.opacity = Math.max(0.05, 0.45 - height * 0.025);
+
+            // ── Stats ──
+            const speed = Math.abs(vy);
+            const dispH = Math.max(0, y - SPHERE_REST_Y);
+            const mass = getMass();
+            const mechanicalEnergy = mass * getGravity() * dispH + 0.5 * mass * vy * vy;
+            const energy = Math.min(100, (mechanicalEnergy / currentLaunchEnergy) * 100);
+            const predictedMaxHeight = predictMaxHeight();
+
+            statState.textContent = isJumping ? (vy >= 0 ? 'RISING' : 'FALLING') : 'GROUNDED';
+            statState.className   = 'val ' + (isJumping ? 'jumping' : 'grounded');
+            statSpeed.textContent = speed.toFixed(2) + ' m/s';
+            statHeight.textContent = dispH.toFixed(2) + ' m';
+            statMaxHeight.textContent = formatMeters(predictedMaxHeight);
+            statAccel.textContent = isJumping ? ay.toFixed(1) + ' m/s^2' : '0.00 m/s^2';
+            statBounces.textContent = bounceCount;
+            energyFill.style.width = energy.toFixed(1) + '%';
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // ── Resize ─────────────────────────────────────────────────────
+        window.addEventListener('resize', () => {
+            camera.aspect = innerWidth / innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(innerWidth, innerHeight);
+        });
+    </script>
+</body>
+</html>
