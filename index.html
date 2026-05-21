@@ -235,6 +235,12 @@
             <input type="number" id="bounceValue" min="0" step="any" value="0.75" title="Custom coefficient of restitution">
         </div>
         <div class="divider"></div>
+        <div class="ctrl-group">
+            <label>FORCE DURATION (s)</label>
+            <input type="range" id="durationSlider" min="0.1" max="5" step="0.1" value="1">
+            <input type="number" id="durationValue" min="0.1" step="any" value="1" title="Custom thrust duration in seconds">
+        </div>
+        <div class="divider"></div>
         <button class="panel-btn" id="launchBtn">LAUNCH</button>
         <button class="panel-btn" id="actionBtn">RESET</button>
     </div>
@@ -398,10 +404,6 @@
         // ── Physics state ──────────────────────────────────────────────
         const FIXED_DT = 1 / 120;
         const MAX_FRAME_TIME = 0.08;
-        const LAUNCH_STROKE = 9.8 / 47; // 47 N on 1 kg at Earth gravity reaches about 1 m
-        const AIR_DENSITY = 1.225;
-        const DRAG_COEFFICIENT = 0.47; // smooth sphere
-        const CROSS_SECTION_AREA = Math.PI * SPHERE_RADIUS * SPHERE_RADIUS;
         const SETTLE_SPEED = 0.08;
         const SETTLE_HEIGHT = 0.015;
 
@@ -413,20 +415,23 @@
         let accumulator = 0;
         let bounceCount = 0;
         let currentLaunchEnergy = 1;
+        let thrustRemaining = 0;
         let squashAmount = 0;
         const scaleTarget = new THREE.Vector3(1, 1, 1);
 
         const controlsMap = {
-            force:   wireControl('jumpPowerSlider', 'jumpPowerValue', 0, 220),
-            mass:    wireControl('weightSlider',    'weightValue',    0.001, 10),
-            gravity: wireControl('gravitySlider',   'gravityValue',   0, 9.8),
-            bounce:  wireControl('bounceSlider',    'bounceValue',    0, 0.75),
+            force:    wireControl('jumpPowerSlider', 'jumpPowerValue', 0, 220),
+            mass:     wireControl('weightSlider',    'weightValue',    0.001, 10),
+            gravity:  wireControl('gravitySlider',   'gravityValue',   0, 9.8),
+            bounce:   wireControl('bounceSlider',    'bounceValue',    0, 0.75),
+            duration: wireControl('durationSlider',  'durationValue',  0.1, 1),
         };
 
         const getGravity = () => controlsMap.gravity.value();
         const getForce   = () => controlsMap.force.value();
         const getMass    = () => controlsMap.mass.value();
         const getBounce  = () => controlsMap.bounce.value();
+        const getForceDuration = () => controlsMap.duration.value();
 
         function formatNumber(value) {
             return Number.isInteger(value) ? String(value) : String(parseFloat(value.toFixed(6)));
@@ -484,6 +489,7 @@
             ay = 0;
             isJumping = false;
             accumulator = 0;
+            thrustRemaining = 0;
             sphereGroup.position.y = y;
             sphereGroup.scale.set(1,1,1);
             bounceCount = 0;
@@ -506,22 +512,20 @@
             // Only launch on short tap (not drag start) — handled via pointerup delta
         });
 
-        function getLaunchVelocity() {
+        function predictMaxHeight() {
             const mass = getMass();
             const force = getForce();
-
-            if (force <= 0) return 0;
-
-            const launchWork = force * LAUNCH_STROKE;
-            return Math.sqrt((2 * launchWork) / mass);
-        }
-
-        function predictMaxHeight() {
             const gravity = getGravity();
-            const v0 = getLaunchVelocity();
-            if (v0 <= 0) return 0;
+            const duration = getForceDuration();
+            const poweredAccel = force / mass - gravity;
+
+            if (poweredAccel <= 0) return 0;
             if (gravity <= 0.0001) return Infinity;
-            return (v0 * v0) / (2 * gravity);
+
+            const poweredHeight = 0.5 * poweredAccel * duration * duration;
+            const releaseSpeed = poweredAccel * duration;
+            const coastHeight = (releaseSpeed * releaseSpeed) / (2 * gravity);
+            return poweredHeight + coastHeight;
         }
 
         function formatMeters(value) {
@@ -536,17 +540,22 @@
             const mass = getMass();
             const gravity = getGravity();
             const force = getForce();
-            const v0 = getLaunchVelocity();
+            const duration = getForceDuration();
+            const poweredAccel = force / mass - gravity;
 
-            if (v0 <= 0) {
+            if (force <= 0 || poweredAccel <= 0) {
                 squashAmount = Math.min(0.08, (force / Math.max(mass * gravity, 0.001)) * 0.035);
                 return;
             }
 
             y = SPHERE_REST_Y;
-            vy = v0;
-            ay = 0;
-            currentLaunchEnergy = Math.max(0.5 * mass * v0 * v0, 1);
+            vy = 0;
+            ay = poweredAccel;
+            thrustRemaining = duration;
+            const predictedHeight = predictMaxHeight();
+            currentLaunchEnergy = Number.isFinite(predictedHeight)
+                ? Math.max(force * predictedHeight, 1)
+                : Math.max(0.5 * mass * Math.pow(poweredAccel * FORCE_DURATION, 2), 1);
             isJumping = true;
             bounceCount = 0;
             accumulator = 0;
@@ -568,8 +577,9 @@
         // ── Animation loop ─────────────────────────────────────────────
         let rotY = 0;
 
-        function accelerationFor(velocity, mass, gravity) {
-            return -gravity;
+        function accelerationFor(mass, gravity) {
+            const poweredAccel = thrustRemaining > 0 ? getForce() / mass : 0;
+            return poweredAccel - gravity;
         }
 
         function findGroundImpactTime(startY, startVy, accel, dt) {
@@ -600,6 +610,7 @@
             ay = 0;
             isJumping = false;
             accumulator = 0;
+            thrustRemaining = 0;
         }
 
         function shouldSettle(reboundVy, gravity, bounceFactor) {
@@ -613,40 +624,56 @@
             const mass = getMass();
             const gravity = getGravity();
             const bounceFactor = getBounce();
-            const startY = y;
-            const startVy = vy;
 
-            ay = accelerationFor(startVy, mass, gravity);
-            vy += ay * dt;
-            y += startVy * dt + 0.5 * ay * dt * dt;
+            let remainingDt = dt;
+            while (remainingDt > 0 && isJumping) {
+                const wasPowered = thrustRemaining > 0;
+                const subDt = wasPowered
+                    ? Math.min(remainingDt, thrustRemaining)
+                    : remainingDt;
+                const startY = y;
+                const startVy = vy;
 
-            if (y > SPHERE_REST_Y) return;
+                ay = accelerationFor(mass, gravity);
+                vy += ay * subDt;
+                y += startVy * subDt + 0.5 * ay * subDt * subDt;
 
-            const hitTime = findGroundImpactTime(startY, startVy, ay, dt) ?? dt;
-            const impactVy = startVy + ay * hitTime;
-            const impactSpeed = Math.max(0, -impactVy);
+                if (wasPowered) {
+                    thrustRemaining = Math.max(0, thrustRemaining - subDt);
+                }
 
-            y = SPHERE_REST_Y;
-            bounceCount++;
-            squashAmount = Math.max(
-                squashAmount,
-                Math.min(0.22, impactSpeed * 0.018) * (0.45 + bounceFactor * 0.55)
-            );
+                remainingDt -= subDt;
 
-            const reboundVy = impactSpeed * bounceFactor;
-            if (shouldSettle(reboundVy, gravity, bounceFactor)) {
-                settleOnGround();
-                return;
-            }
+                if (y > SPHERE_REST_Y) continue;
 
-            vy = reboundVy;
+                const movingIntoGround = startVy < 0 || ay < 0;
+                if (!movingIntoGround) {
+                    y = SPHERE_REST_Y;
+                    continue;
+                }
 
-            const remaining = Math.max(0, dt - hitTime);
-            if (remaining > 0) {
-                ay = accelerationFor(vy, mass, gravity);
-                y = SPHERE_REST_Y + Math.max(0, vy * remaining + 0.5 * ay * remaining * remaining);
-                vy += ay * remaining;
-                if (y <= SPHERE_REST_Y && Math.abs(vy) < SETTLE_SPEED) settleOnGround();
+                const hitTime = findGroundImpactTime(startY, startVy, ay, subDt) ?? subDt;
+                const impactVy = startVy + ay * hitTime;
+                const impactSpeed = Math.max(0, -impactVy);
+
+                y = SPHERE_REST_Y;
+                bounceCount++;
+                squashAmount = Math.max(
+                    squashAmount,
+                    Math.min(0.22, impactSpeed * 0.018) * (0.45 + bounceFactor * 0.55)
+                );
+
+                const reboundVy = impactSpeed * bounceFactor;
+                if (shouldSettle(reboundVy, gravity, bounceFactor)) {
+                    settleOnGround();
+                    return;
+                }
+
+                vy = reboundVy;
+                if (wasPowered) {
+                    thrustRemaining += Math.max(0, subDt - hitTime);
+                }
+                remainingDt += Math.max(0, subDt - hitTime);
             }
         }
 
