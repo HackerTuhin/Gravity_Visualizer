@@ -79,7 +79,7 @@
         .ctrl-group { display: flex; align-items: center; gap: 8px; }
         .divider { width: 1px; height: 30px; background: rgba(0,200,255,0.15); }
 
-        #actionBtn {
+        .panel-btn {
             background: rgba(0,200,255,0.1);
             border: 1px solid rgba(0,200,255,0.4);
             color: #00ccff;
@@ -92,7 +92,7 @@
             transition: all 0.2s;
             font-family: inherit;
         }
-        #actionBtn:hover { background: rgba(0,200,255,0.22); box-shadow: 0 0 16px rgba(0,200,255,0.2); }
+        .panel-btn:hover { background: rgba(0,200,255,0.22); box-shadow: 0 0 16px rgba(0,200,255,0.2); }
 
         #hint {
             position: fixed;
@@ -141,10 +141,75 @@
             transition: width 0.05s linear;
             box-shadow: 0 0 8px rgba(0,255,170,0.5);
         }
+
+        @media (max-width: 700px) {
+            #panel {
+                bottom: 14px;
+                left: 14px !important;
+                right: 14px !important;
+                width: auto !important;
+                max-width: none;
+                transform: none !important;
+                padding: 14px;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+            }
+
+            #panel > * {
+                min-width: 0;
+            }
+
+            .ctrl-group {
+                display: grid !important;
+                grid-template-columns: 86px minmax(0, 1fr) 74px;
+                align-items: center;
+                gap: 8px;
+                width: 100%;
+                min-width: 0;
+            }
+
+            #panel label {
+                text-align: left;
+                letter-spacing: 0.06em;
+            }
+
+            #panel input[type="range"] {
+                width: 100% !important;
+                min-width: 0;
+            }
+
+            #panel input[type="number"] {
+                width: 74px;
+            }
+
+            .divider {
+                display: none;
+            }
+
+            .panel-btn {
+                width: 100%;
+                min-height: 34px;
+            }
+
+            #hint {
+                bottom: 260px;
+                width: calc(100vw - 28px);
+                text-align: center;
+                line-height: 1.4;
+            }
+
+            #stats {
+                top: 14px;
+                right: 14px;
+                padding: 14px 18px;
+                min-width: 210px;
+            }
+        }
     </style>
 </head>
 <body>
-    <div id="hint">SPACE to launch · DRAG to orbit · SCROLL to zoom</div>
+    <div id="hint">SPACE / LAUNCH to jump - DRAG to orbit - SCROLL to zoom</div>
     <div id="panel">
         <div class="ctrl-group">
             <label>FORCE (N)</label>
@@ -170,7 +235,8 @@
             <input type="number" id="bounceValue" min="0" step="any" value="0.75" title="Custom coefficient of restitution">
         </div>
         <div class="divider"></div>
-        <button id="actionBtn">RESET</button>
+        <button class="panel-btn" id="launchBtn">LAUNCH</button>
+        <button class="panel-btn" id="actionBtn">RESET</button>
     </div>
     <div id="stats">
         <div class="row"><span class="lbl">STATE</span><span class="val grounded" id="statState">GROUNDED</span></div>
@@ -409,6 +475,7 @@
 
         // Reset
         document.getElementById('actionBtn').addEventListener('click', reset);
+        document.getElementById('launchBtn').addEventListener('click', launch);
 
         function reset() {
             Object.values(controlsMap).forEach(control => control.reset());
